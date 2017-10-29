@@ -101,7 +101,7 @@ void *update_clk_vector(void *arg)
 	int byte_read;
 	struct message msg;
 	byte_read = read(td->csock, &msg, sizeof(struct message));
-	//cout<<"Offset at Client ["<<msg.pid<<"] :"<<msg.offset<<endl;
+	cout<<"Offset at Client ["<<msg.pid<<"] :"<<msg.offset<<endl;
 	//cout<<"Sizeof(message):"<<sizeof(struct message)<<" byteread:"<<byte_read<<endl;
 	//cout<<"ConnId at Client ["<<msg.pid<<"] :"<<msg.conn<<endl;
 	msg.conn = td->csock;
@@ -206,6 +206,7 @@ void make_self_server(struct process &self, vector<struct process> process_list)
 	for(cli=0;cli<no_of_clients;cli++)
 	{
 		pthread_join(thrd[cli],NULL);
+		//cout<<"Waiting for client:"<<(cli + 2)<<endl;
 	}
 
 	cout<<"*****Sync Start*****"<<endl<<endl;
