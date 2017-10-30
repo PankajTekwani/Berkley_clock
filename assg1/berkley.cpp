@@ -173,6 +173,7 @@ void make_self_server(struct process &self, vector<struct process> process_list)
 	if(bind(self.listen_sock,(struct sockaddr *)&server_addr,sizeof(server_addr)))
 	{
 		printf("\nUnable to Bind");
+		return;
 	}
 
 	listen(self.listen_sock,10);
@@ -273,10 +274,6 @@ int main(int argc, char *argv[])
 	struct process self;
 	vector<struct process> process_list;
 	vector<struct process>::iterator proc_it;
-
-	int cli_sock;
-	struct sockaddr_in serv_addr;
-	struct hostent *server;
 
 	srand (time(NULL));
 	self.clock = rand() % 100 + 100;
