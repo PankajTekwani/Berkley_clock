@@ -140,45 +140,79 @@ int check_causality(struct process *proc, struct message msg)
 	return flg;
 }
 
+void deliver_msg(struct process *proc, struct message msg)
+{
+	int i,size,index;
+	index = get_index_of_vectorClk(proc->v_clk,msg.pid);
+	cout<<"Deliver msg_id:"<<msg.msg_id<<" ";
+	proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
+	size = proc->v_clk.size();
+	cout<<"P"<<proc->pid<<" Vector Clk:[";
+	for(i = 0; i<size ;i++)
+	{
+		cout<<proc->v_clk[i].clk<<" ";
+	}
+	cout<<"]"<<endl;
+}
+/*
+int get_index_buffer(struct process *proc, vector<struct message> msg)
+{
+	int i,size = proc->buffer.size();
+	int index = get_index_of_vectorClk(proc->v_clk,msg.pid); 
+	int vc = 
+	for(i=0;i<size;i++)
+	{
+		//cout<<i+1<<" P"<<v_clk[i].pid<<endl;
+		if(buffer[i].pid == pid)
+			return i;
+	}
+	return -1;
+}
+*/
+void check_buffer(struct process *proc)
+{
+	int i,size = proc->buffer.size();
+	struct message msg;
+	for(i=0;i<size;i++)
+	{
+		msg = proc->buffer[i];
+		if(check_causality(proc,msg))
+		{
+			deliver_msg(proc,msg);
+			proc->buffer.erase(proc->buffer.begin() + i);
+		}
+	}
+}
+
 void * receive_msg(void *arg)
 {
-	int i;
 	struct thread_data *td = (struct thread_data *)arg;
 	struct message msg;
-	int byte_read,index;
+	int byte_read;
 	while(1)
 	{
 		byte_read = read(td->conn,&msg,sizeof(struct message));
 		if(byte_read > 0)
 		{
-			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid <<" Vector Clk:[";
-			for(i = 0;msg.vc[i]!=-1 ;i++)
+			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid <<endl;
+
+			if(td->proc->buffer.size())
 			{
-				cout<<msg.vc[i]<<" ";
+				check_buffer(td->proc);
 			}
-			cout<<"]"<<endl;
+			// If causality is violated then buffer the message
 			if(!check_causality(td->proc,msg))
 			{
-				//buffer_msg();
+				td->proc->buffer.push_back(msg);
 			}
+			// Else deliver the message
 			else
 			{
-				index = get_index_of_vectorClk(td->proc->v_clk,msg.pid);
-				cout<<"Deliver msg_id:"<<msg.msg_id<<endl;
-				td->proc->v_clk[index].clk = td->proc->v_clk[index].clk + 1;
+				deliver_msg(td->proc,msg);
 			}
 		}
 	}
 }
-
-/*
-struct message
-{
-	int msg_id;
-	int pid;
-	vector<struct process_clock> v_clk;
-};
-*/
 
 void* reciever(void * arg)
 {
@@ -237,10 +271,9 @@ void* sender(void * arg)
 	int msg_id,i,byte_written,index;
 	int proc_grp_size = proc->p_group.size();
 	int vsize = proc->v_clk.size();	
-	msg_id = 10 * proc->pid;
 	//for()
 	{
-		msg.msg_id = msg_id;
+		msg.msg_id = msg_id = 1000 * proc->pid; //+i
 		msg.pid = proc->pid;
 		index = get_index_of_vectorClk(proc->v_clk, proc->pid);
 		//cout<<"Index of P"<<proc->pid<<":"<<index<<endl;
