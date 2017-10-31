@@ -109,25 +109,64 @@ int fetch_port(vector<struct process_group> &p_group,vector<struct process_clock
 	return self_port;
 }
 
+int get_index_of_vectorClk(vector<struct process_clock> v_clk, int pid)
+{
+	int i,size = v_clk.size();
+	for(i=0;i<size;i++)
+	{
+		//cout<<i+1<<" P"<<v_clk[i].pid<<endl;
+		if(v_clk[i].pid == pid)
+			return i;
+	}
+	return -1;
+}
 
+int check_causality(struct process *proc, struct message msg)
+{
+	int i,index,size = proc->v_clk.size();
+	int flg=1,spid = msg.pid;
+	index = get_index_of_vectorClk(proc->v_clk,spid);
+	if(msg.vc[index] != proc->v_clk[index].clk + 1)
+	{
+		return 0;
+	}
+	for(i=0;i<size;i++)
+	{
+		if(msg.vc[i] > proc->v_clk[i].clk && i!=index)
+		{
+			flg = 0;
+		}
+	}
+	return flg;
+}
 
 void * receive_msg(void *arg)
 {
 	int i;
 	struct thread_data *td = (struct thread_data *)arg;
 	struct message msg;
-	int byte_read;
+	int byte_read,index;
 	while(1)
 	{
 		byte_read = read(td->conn,&msg,sizeof(struct message));
 		if(byte_read > 0)
 		{
-			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid <<" Vector Clk:";
+			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid <<" Vector Clk:[";
 			for(i = 0;msg.vc[i]!=-1 ;i++)
 			{
 				cout<<msg.vc[i]<<" ";
 			}
-			cout<<endl;
+			cout<<"]"<<endl;
+			if(!check_causality(td->proc,msg))
+			{
+				//buffer_msg();
+			}
+			else
+			{
+				index = get_index_of_vectorClk(td->proc->v_clk,msg.pid);
+				cout<<"Deliver msg_id:"<<msg.msg_id<<endl;
+				td->proc->v_clk[index].clk = td->proc->v_clk[index].clk + 1;
+			}
 		}
 	}
 }
@@ -190,17 +229,6 @@ void* reciever(void * arg)
 	}
 }
 
-int get_index_of_vectorClk(vector<struct process_clock> v_clk, int pid)
-{
-	int i,size = v_clk.size();
-	for(i=0;i<size;i++)
-	{
-		//cout<<i+1<<" P"<<v_clk[i].pid<<endl;
-		if(v_clk[i].pid == pid)
-			return i;
-	}
-	return -1;
-}
 
 void* sender(void * arg)
 {
@@ -295,10 +323,10 @@ int create_connection(struct process &curr_proc)
 		//Connecct to Server
 		if(connect(cli_sock,(struct sockaddr *)&serv_addr,sizeof(serv_addr))<0)
 		{
-			cout<<"Unable to connect to P"<< proc.pid<<" Port = "<< proc.port <<endl;
+			//cout<<"Unable to connect to P"<< proc.pid<<" Port = "<< proc.port <<endl;
 			close(cli_sock);
 			connect_grp.push(proc);
-			cout<<"Size of Queue:"<<connect_grp.size()<<endl;
+			//cout<<"Size of Queue:"<<connect_grp.size()<<endl;
 			sleep(1);
 			continue;
 		}
@@ -344,12 +372,12 @@ int main(int argc, char *argv[])
 	{
 		cout<< proc_it->pid<<"*"<< proc_it->port <<endl;
 	}*/
-
+/*
 	for(vc_it = self.v_clk.begin(); vc_it!=self.v_clk.end(); vc_it++)
 	{
 		cout<< vc_it->pid<<"*"<< vc_it->clk <<endl;
 	}
-
+*/
 	//Create Recieving Thread
 	pthread_create(&listen_thread,NULL,reciever,(void*)&self);
 	create_connection(self);
