@@ -25,6 +25,7 @@
 
 using namespace std;
 
+#define NO_OF_MESSAGES 2
 
 struct message
 {
@@ -203,6 +204,7 @@ void * receive_msg(void *arg)
 			// If causality is violated then buffer the message
 			if(!check_causality(td->proc,msg))
 			{
+				cout<<"Buffer msg id:"<<msg.msg_id<<endl;
 				td->proc->buffer.push_back(msg);
 			}
 			// Else deliver the message
@@ -268,12 +270,12 @@ void* sender(void * arg)
 {
 	struct process *proc = (struct process *)arg;
 	struct message msg;
-	int msg_id,i,byte_written,index;
+	int i,j,byte_written,index,x;
 	int proc_grp_size = proc->p_group.size();
 	int vsize = proc->v_clk.size();	
-	//for()
+	for(x=0;x<NO_OF_MESSAGES;x++)
 	{
-		msg.msg_id = msg_id = 1000 * proc->pid; //+i
+		msg.msg_id = (1000 * proc->pid) + x; //+i
 		msg.pid = proc->pid;
 		index = get_index_of_vectorClk(proc->v_clk, proc->pid);
 		//cout<<"Index of P"<<proc->pid<<":"<<index<<endl;
@@ -286,9 +288,14 @@ void* sender(void * arg)
 		//msg.v_clk = proc->v_clk;
 		for(i = 0; i<proc_grp_size ; i++)
 		{
-			sleep(proc->pid);
-			cout<<"Send Msg from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<endl;
+			cout<<"Send msg id "<< msg.msg_id <<" from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<" [";
+			for(j=0;j<vsize;j++)
+			{
+				cout<< proc->v_clk[j].clk<<" ";
+			}
+			cout<<"]"<<endl;
 			byte_written = write(proc->p_group[i].conn, (void *)&msg, sizeof(struct message));
+			sleep((proc->pid));
 		}
 	}
 }
