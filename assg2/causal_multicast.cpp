@@ -30,7 +30,8 @@ struct message
 {
 	int msg_id;
 	int pid;
-	vector<struct process_clock> v_clk;
+	//vector<struct process_clock> v_clk;
+	int vc[50];
 };
 
 struct process_group
@@ -62,7 +63,8 @@ struct process
 struct thread_data
 {
 	struct process *proc;
-	struct message msg;
+	//struct message msg;
+	int conn;
 };
 
 /*
@@ -70,7 +72,7 @@ Create processes list to send multicast and retrieves its own port no. from file
 Also initialize vector clocks to 0 for all processes.
 */
 
-int fetch_port(vector<struct process_group> &p_group,vector<struct process_clock> v_clk,int id)
+int fetch_port(vector<struct process_group> &p_group,vector<struct process_clock> &v_clk,int id)
 {
 	ifstream file;
 	struct process_group p;
@@ -107,17 +109,37 @@ int fetch_port(vector<struct process_group> &p_group,vector<struct process_clock
 	return self_port;
 }
 
-void * check_causality(void *arg)
+
+
+void * receive_msg(void *arg)
 {
-	int i,size;
+	int i;
 	struct thread_data *td = (struct thread_data *)arg;
-	cout<<"Msg Id:"<<td->msg.msg_id<<endl;
-	size = td->msg.v_clk.size();
-	for(i=0;i<size;i++)
+	struct message msg;
+	int byte_read;
+	while(1)
 	{
-		cout<<td->msg.v_clk[i].pid<<"\t"<<td->msg.v_clk[i].clk<<endl;
+		byte_read = read(td->conn,&msg,sizeof(struct message));
+		if(byte_read > 0)
+		{
+			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid <<" Vector Clk:";
+			for(i = 0;msg.vc[i]!=-1 ;i++)
+			{
+				cout<<msg.vc[i]<<" ";
+			}
+			cout<<endl;
+		}
 	}
 }
+
+/*
+struct message
+{
+	int msg_id;
+	int pid;
+	vector<struct process_clock> v_clk;
+};
+*/
 
 void* reciever(void * arg)
 {
@@ -127,7 +149,7 @@ void* reciever(void * arg)
 	struct message msg;
 	pthread_t thread;
 	struct thread_data td;
-	int conn,byte_read;
+	int conn,byte_read,i;
 	if((proc->listen_sock = socket(AF_INET,SOCK_STREAM,0)) == -1)
 	{
 		printf("\nUnable to get server socket");
@@ -161,31 +183,53 @@ void* reciever(void * arg)
 		}
 		//cout<<"connection estd"<<endl;
 		//Prepare thread data and create New Thread
-		byte_read = read(conn,&msg,sizeof(struct message));
-		cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid<<endl;
-/*		td.msg = msg;
+		//td.msg = msg;
+		td.conn = conn;
 		td.proc = proc;
-		pthread_create(&thread,NULL,check_causality,(void*)&td);
-*/
+		pthread_create(&thread,NULL,receive_msg,(void*)&td);
 	}
+}
+
+int get_index_of_vectorClk(vector<struct process_clock> v_clk, int pid)
+{
+	int i,size = v_clk.size();
+	for(i=0;i<size;i++)
+	{
+		//cout<<i+1<<" P"<<v_clk[i].pid<<endl;
+		if(v_clk[i].pid == pid)
+			return i;
+	}
+	return -1;
 }
 
 void* sender(void * arg)
 {
 	struct process *proc = (struct process *)arg;
 	struct message msg;
-	int msg_id,i,byte_written;
-	int proc_grp_size = proc->p_group.size();	
+	int msg_id,i,byte_written,index;
+	int proc_grp_size = proc->p_group.size();
+	int vsize = proc->v_clk.size();	
 	msg_id = 10 * proc->pid;
-	msg.msg_id = msg_id;
-	msg.pid = proc->pid;
-	for(i = 0; i<proc_grp_size ; i++)
+	//for()
 	{
-		sleep(proc->pid);
-		cout<<"Send Msg from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<endl;
-		byte_written = write(proc->p_group[i].conn, (void *)&msg, sizeof(struct message));
+		msg.msg_id = msg_id;
+		msg.pid = proc->pid;
+		index = get_index_of_vectorClk(proc->v_clk, proc->pid);
+		//cout<<"Index of P"<<proc->pid<<":"<<index<<endl;
+		proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
+		for(i=0;i<vsize;i++)
+		{
+			msg.vc[i] = proc->v_clk[i].clk;
+		}
+		msg.vc[i] = -1;
+		//msg.v_clk = proc->v_clk;
+		for(i = 0; i<proc_grp_size ; i++)
+		{
+			sleep(proc->pid);
+			cout<<"Send Msg from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<endl;
+			byte_written = write(proc->p_group[i].conn, (void *)&msg, sizeof(struct message));
+		}
 	}
-	
 }
 
 void prepare_q(queue<struct process_group> &connect_grp,vector<struct process_group> p_group)
@@ -281,6 +325,7 @@ int main(int argc, char *argv[])
 	struct process self;
 //	vector<struct process> process_list;
 	vector<struct process_group>::iterator proc_it;
+	vector<struct process_clock>::iterator vc_it;
 	pthread_t listen_thread,send_thread;
 
 	setbuf(stdout,NULL);
@@ -300,10 +345,18 @@ int main(int argc, char *argv[])
 		cout<< proc_it->pid<<"*"<< proc_it->port <<endl;
 	}*/
 
+	for(vc_it = self.v_clk.begin(); vc_it!=self.v_clk.end(); vc_it++)
+	{
+		cout<< vc_it->pid<<"*"<< vc_it->clk <<endl;
+	}
+
 	//Create Recieving Thread
 	pthread_create(&listen_thread,NULL,reciever,(void*)&self);
 	create_connection(self);
-	//Create Sending Thread
+/*
+	create_connection() function ensures that all the connection are ready 
+	and we can now send the Messages. Now create Sending Thread
+*/
 	pthread_create(&send_thread,NULL,sender,(void*)&self);
 	//Wait for Reciever Thread.
 	pthread_join(listen_thread,NULL);
