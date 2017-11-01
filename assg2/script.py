@@ -1,5 +1,5 @@
 '''
-The processCofig file is arranged as columns of Process id and corresponding Port no. Process Id 1 is always the time deamon.
+The processCofig file is arranged as columns of Process id and corresponding Port no.
 '''
 
 import os

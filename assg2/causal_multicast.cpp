@@ -25,7 +25,7 @@
 
 using namespace std;
 
-#define NO_OF_MESSAGES 2
+#define NO_OF_MESSAGES 3
 
 struct message
 {
@@ -59,6 +59,8 @@ struct process
 	vector<struct process_clock> v_clk;
 	vector<struct message> buffer;
 	vector<struct process_group> p_group;
+	pthread_mutex_t buffer_lock;
+	pthread_mutex_t vc_lock;
 };
 
 struct thread_data
@@ -124,6 +126,7 @@ int get_index_of_vectorClk(vector<struct process_clock> v_clk, int pid)
 
 int check_causality(struct process *proc, struct message msg)
 {
+	pthread_mutex_lock(&(proc->vc_lock));
 	int i,index,size = proc->v_clk.size();
 	int flg=1,spid = msg.pid;
 	index = get_index_of_vectorClk(proc->v_clk,spid);
@@ -138,12 +141,14 @@ int check_causality(struct process *proc, struct message msg)
 			flg = 0;
 		}
 	}
+	pthread_mutex_unlock(&(proc->vc_lock));
 	return flg;
 }
 
 void deliver_msg(struct process *proc, struct message msg)
 {
 	int i,size,index;
+	pthread_mutex_lock(&(proc->vc_lock));
 	index = get_index_of_vectorClk(proc->v_clk,msg.pid);
 	cout<<"Deliver msg_id:"<<msg.msg_id<<" ";
 	proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
@@ -154,6 +159,7 @@ void deliver_msg(struct process *proc, struct message msg)
 		cout<<proc->v_clk[i].clk<<" ";
 	}
 	cout<<"]"<<endl;
+	pthread_mutex_unlock(&(proc->vc_lock));
 }
 /*
 int get_index_buffer(struct process *proc, vector<struct message> msg)
@@ -170,8 +176,22 @@ int get_index_buffer(struct process *proc, vector<struct message> msg)
 	return -1;
 }
 */
+void push_into_buffer(struct process *proc, struct message msg)
+{
+	//pthread_mutex_lock(&(proc->buffer_lock));
+	proc->buffer.push_back(msg);
+	//pthread_mutex_unlock(&(proc->buffer_lock));
+}
+
+void print_msg(struct message msg)
+{
+	cout<<"MsgId:"<<msg.msg_id<<endl;
+	
+}
+
 void check_buffer(struct process *proc)
 {
+	//pthread_mutex_lock(&(proc->buffer_lock));
 	int i,size = proc->buffer.size();
 	struct message msg;
 	for(i=0;i<size;i++)
@@ -183,14 +203,37 @@ void check_buffer(struct process *proc)
 			proc->buffer.erase(proc->buffer.begin() + i);
 		}
 	}
+	//pthread_mutex_unlock(&(proc->buffer_lock));
+}
+
+void empty_buffer(struct process *proc)
+{
+	int i,size;
+	struct message msg;
+	//printf("Inside %s\n",__FUNCTION__);
+	while(!proc->buffer.empty())
+	{
+		msg = proc->buffer.back();
+		proc->buffer.pop_back();
+		if(check_causality(proc,msg))
+		{
+			deliver_msg(proc,msg);
+		}
+		else
+		{
+			proc->buffer.push_back(msg);
+		}
+	}
+	//printf("Leaving %s\n",__FUNCTION__);
 }
 
 void * receive_msg(void *arg)
 {
 	struct thread_data *td = (struct thread_data *)arg;
 	struct message msg;
-	int byte_read;
-	while(1)
+	int byte_read,i = 0;
+
+	while(i<NO_OF_MESSAGES)
 	{
 		byte_read = read(td->conn,&msg,sizeof(struct message));
 		if(byte_read > 0)
@@ -205,7 +248,8 @@ void * receive_msg(void *arg)
 			if(!check_causality(td->proc,msg))
 			{
 				cout<<"Buffer msg id:"<<msg.msg_id<<endl;
-				td->proc->buffer.push_back(msg);
+				push_into_buffer(td->proc, msg);
+				//td->proc->buffer.push_back(msg);
 			}
 			// Else deliver the message
 			else
@@ -213,7 +257,11 @@ void * receive_msg(void *arg)
 				deliver_msg(td->proc,msg);
 			}
 		}
+		i++;
 	}
+	empty_buffer(td->proc);
+	if(td->proc->buffer.size())
+		cout<<"Buffer still not empty"<<endl;
 }
 
 void* reciever(void * arg)
@@ -222,9 +270,10 @@ void* reciever(void * arg)
 	struct sockaddr_in server_addr,cli_addr;
 	socklen_t clilen;
 	struct message msg;
-	pthread_t thread;
-	struct thread_data td;
-	int conn,byte_read,i;
+	int conn,byte_read,i,size;
+	size = proc->p_group.size();
+	pthread_t thread[size];
+	struct thread_data td[size];
 	if((proc->listen_sock = socket(AF_INET,SOCK_STREAM,0)) == -1)
 	{
 		printf("\nUnable to get server socket");
@@ -244,8 +293,11 @@ void* reciever(void * arg)
 	listen(proc->listen_sock,10);
 
 	clilen = sizeof(cli_addr);
-	cout<<"P"<<proc->pid<<" created Server Socket"<<endl;
-	while(1)
+	//cout<<"P"<<proc->pid<<" created Server Socket"<<endl;
+
+	i=0;
+	size = proc->p_group.size();
+	while(i<size)
 	{
 	
 		//Accept Connections from Client
@@ -258,13 +310,16 @@ void* reciever(void * arg)
 		}
 		//cout<<"connection estd"<<endl;
 		//Prepare thread data and create New Thread
-		//td.msg = msg;
-		td.conn = conn;
-		td.proc = proc;
-		pthread_create(&thread,NULL,receive_msg,(void*)&td);
+		td[i].conn = conn;
+		td[i].proc = proc;
+		pthread_create(&thread[i],NULL,receive_msg,(void*)&td[i]);
+		i++;
+	}
+	for(i=0;i<size;i++)
+	{
+		pthread_join(thread[i],NULL);
 	}
 }
-
 
 void* sender(void * arg)
 {
@@ -272,31 +327,37 @@ void* sender(void * arg)
 	struct message msg;
 	int i,j,byte_written,index,x;
 	int proc_grp_size = proc->p_group.size();
-	int vsize = proc->v_clk.size();	
+	int vsize;	
 	for(x=0;x<NO_OF_MESSAGES;x++)
 	{
-		msg.msg_id = (1000 * proc->pid) + x; //+i
+		msg.msg_id = (100 * proc->pid) + x; //+i
 		msg.pid = proc->pid;
+
+		pthread_mutex_lock(&(proc->vc_lock));
+		vsize = proc->v_clk.size();
 		index = get_index_of_vectorClk(proc->v_clk, proc->pid);
-		//cout<<"Index of P"<<proc->pid<<":"<<index<<endl;
 		proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
+
 		for(i=0;i<vsize;i++)
 		{
 			msg.vc[i] = proc->v_clk[i].clk;
 		}
+		pthread_mutex_unlock(&(proc->vc_lock));
 		msg.vc[i] = -1;
 		//msg.v_clk = proc->v_clk;
+		cout<<"Sending Multicast Msg id "<< msg.msg_id<<" [";
+		for(j=0;j<vsize;j++)
+		{
+				cout<< msg.vc[j]<<" ";
+		}
+			cout<<"]"<<endl;
 		for(i = 0; i<proc_grp_size ; i++)
 		{
-			cout<<"Send msg id "<< msg.msg_id <<" from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<" [";
-			for(j=0;j<vsize;j++)
-			{
-				cout<< proc->v_clk[j].clk<<" ";
-			}
-			cout<<"]"<<endl;
 			byte_written = write(proc->p_group[i].conn, (void *)&msg, sizeof(struct message));
-			sleep((proc->pid));
+			//cout<<"Sent msg id "<< msg.msg_id <<" from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<" [";
+			
 		}
+		sleep((proc->pid));
 	}
 }
 
@@ -370,7 +431,7 @@ int create_connection(struct process &curr_proc)
 			sleep(1);
 			continue;
 		}
-		cout<<"Connected P"<<curr_proc.pid<<" with:P"<<proc.pid<<endl;
+		//cout<<"Connected P"<<curr_proc.pid<<" with:P"<<proc.pid<<endl;
 		index = get_index(curr_proc.p_group, proc.pid);
 		if(index == -1)
 		{
@@ -391,12 +452,13 @@ int create_connection(struct process &curr_proc)
 int main(int argc, char *argv[])
 {
 	struct process self;
-//	vector<struct process> process_list;
 	vector<struct process_group>::iterator proc_it;
 	vector<struct process_clock>::iterator vc_it;
 	pthread_t listen_thread,send_thread;
 
 	setbuf(stdout,NULL);
+	pthread_mutex_init(&self.buffer_lock,NULL);
+	pthread_mutex_init(&self.vc_lock,NULL);
 	self.pid = atoi(argv[1]);
 	self.port=fetch_port(self.p_group, self.v_clk, self.pid);
 	cout<<"P"<<self.pid<<" ,Port:"<<self.port<<endl;
@@ -428,6 +490,7 @@ int main(int argc, char *argv[])
 	pthread_create(&send_thread,NULL,sender,(void*)&self);
 	//Wait for Reciever Thread.
 	pthread_join(listen_thread,NULL);
+	pthread_join(send_thread,NULL);
 	return 0;
 }
 
