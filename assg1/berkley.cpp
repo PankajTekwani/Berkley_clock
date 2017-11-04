@@ -124,6 +124,7 @@ int sync_clocks(vector<struct message> &msg_vector)
 	{
 		it->offset = avg - it->offset;
 	}
+	cout<<"Avg of all Offsets:"<<avg<<endl;
 	return avg;
 }
 
@@ -177,11 +178,13 @@ void make_self_server(struct process &self, vector<struct process> process_list)
 	}
 
 	listen(self.listen_sock,10);
-	cout<<"Clock at Time Deamon:"<<self.clock<<endl;
+	cout<<"*********Time Daemon*********"<<endl;
+	cout<<"Clock at Time Daemon:"<<self.clock<<endl;
 	clilen = sizeof(cli_addr);
 	cli = 0;
 	//cout<<"no_of_clients = "<<no_of_clients<<endl;
 	//offset.push_back(self.clock);
+	cout<<"Sending Clock to all Clients."<<endl;
 	while(cli<no_of_clients)
 	{
 	
@@ -259,11 +262,13 @@ void make_self_client(struct process &self, vector<struct process> process_list)
 	}
 
 	byte_read = read(self.listen_sock,&msg,sizeof(msg));
-	cout<<"Clock at server:"<<msg.offset<<endl;
+	cout<<"Clock at Time Daemon:"<<msg.offset<<endl;
 	msg.offset = self.clock - msg.offset;
 	msg.pid = self.pid;
 	byte_written = write(self.listen_sock, (void *)&msg, sizeof(msg));
+	cout<<"Sent offset to Time Daemon"<<endl;
 	byte_read = read(self.listen_sock,&msg,sizeof(msg));
+	cout<<"Recieved new offset from Time Daemon"<<endl;
 	self.clock += msg.offset;
 	cout<<"Synced local Clock:"<<self.clock<<endl;
 	close(self.listen_sock);

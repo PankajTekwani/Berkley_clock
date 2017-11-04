@@ -25,12 +25,13 @@
 
 using namespace std;
 
-#define NO_OF_MESSAGES 3
+#define NO_OF_MESSAGES 80
 
 struct message
 {
 	int msg_id;
 	int pid;
+	int is_causal;
 	//vector<struct process_clock> v_clk;
 	int vc[50];
 };
@@ -150,14 +151,28 @@ void deliver_msg(struct process *proc, struct message msg)
 	int i,size,index;
 	pthread_mutex_lock(&(proc->vc_lock));
 	index = get_index_of_vectorClk(proc->v_clk,msg.pid);
-	cout<<"Deliver msg_id:"<<msg.msg_id<<" ";
-	proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
 	size = proc->v_clk.size();
+
+	cout<<" Vector in Msg:[ ";
+	for(i = 0; i<size ;i++)
+	{
+		cout<<msg.vc[i]<<" ";
+	}
+	cout<<"]";
+
+	for(i = 0; i<size && i!= index;i++)
+	{
+		proc->v_clk[i].clk = max(proc->v_clk[i].clk,msg.vc[i]);
+	}	
+
+	cout<<" Deliverd MsgId:"<<msg.msg_id<<" ";
+	proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
 	cout<<"P"<<proc->pid<<" Vector Clk:[";
 	for(i = 0; i<size ;i++)
 	{
 		cout<<proc->v_clk[i].clk<<" ";
 	}
+
 	cout<<"]"<<endl;
 	pthread_mutex_unlock(&(proc->vc_lock));
 }
@@ -178,20 +193,14 @@ int get_index_buffer(struct process *proc, vector<struct message> msg)
 */
 void push_into_buffer(struct process *proc, struct message msg)
 {
-	//pthread_mutex_lock(&(proc->buffer_lock));
+	pthread_mutex_lock(&(proc->buffer_lock));
 	proc->buffer.push_back(msg);
-	//pthread_mutex_unlock(&(proc->buffer_lock));
-}
-
-void print_msg(struct message msg)
-{
-	cout<<"MsgId:"<<msg.msg_id<<endl;
-	
+	pthread_mutex_unlock(&(proc->buffer_lock));
 }
 
 void check_buffer(struct process *proc)
 {
-	//pthread_mutex_lock(&(proc->buffer_lock));
+	pthread_mutex_lock(&(proc->buffer_lock));
 	int i,size = proc->buffer.size();
 	struct message msg;
 	for(i=0;i<size;i++)
@@ -203,7 +212,7 @@ void check_buffer(struct process *proc)
 			proc->buffer.erase(proc->buffer.begin() + i);
 		}
 	}
-	//pthread_mutex_unlock(&(proc->buffer_lock));
+	pthread_mutex_unlock(&(proc->buffer_lock));
 }
 
 void empty_buffer(struct process *proc)
@@ -211,6 +220,7 @@ void empty_buffer(struct process *proc)
 	int i,size;
 	struct message msg;
 	//printf("Inside %s\n",__FUNCTION__);
+	pthread_mutex_lock(&(proc->buffer_lock));
 	while(!proc->buffer.empty())
 	{
 		msg = proc->buffer.back();
@@ -224,6 +234,7 @@ void empty_buffer(struct process *proc)
 			proc->buffer.push_back(msg);
 		}
 	}
+	pthread_mutex_unlock(&(proc->buffer_lock));
 	//printf("Leaving %s\n",__FUNCTION__);
 }
 
@@ -231,14 +242,24 @@ void * receive_msg(void *arg)
 {
 	struct thread_data *td = (struct thread_data *)arg;
 	struct message msg;
-	int byte_read,i = 0;
-
+	int byte_read,i = 0,sl;
+	int size = td->proc->v_clk.size();
 	while(i<NO_OF_MESSAGES)
 	{
 		byte_read = read(td->conn,&msg,sizeof(struct message));
+		srand (time(NULL));
+		sl = rand() % 5;
+		sleep(sl);
 		if(byte_read > 0)
 		{
-			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid <<endl;
+			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid;
+			cout<<" with Vector Clk:[";
+			for(i = 0; i<size ;i++)
+			{
+				cout<<msg.vc[i]<<" ";
+			}
+
+			cout<<"]"<<endl;
 
 			if(td->proc->buffer.size())
 			{
@@ -325,7 +346,7 @@ void* sender(void * arg)
 {
 	struct process *proc = (struct process *)arg;
 	struct message msg;
-	int i,j,byte_written,index,x;
+	int i,j,byte_written,index,x,sl;
 	int proc_grp_size = proc->p_group.size();
 	int vsize;	
 	for(x=0;x<NO_OF_MESSAGES;x++)
@@ -354,10 +375,15 @@ void* sender(void * arg)
 		for(i = 0; i<proc_grp_size ; i++)
 		{
 			byte_written = write(proc->p_group[i].conn, (void *)&msg, sizeof(struct message));
+			srand (time(NULL));
+			sl = rand() % 3;
+			sleep(sl);
 			//cout<<"Sent msg id "<< msg.msg_id <<" from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<" [";
 			
 		}
-		sleep((proc->pid));
+		srand (time(NULL));
+		sl = rand() % 4;
+		sleep(sl);
 	}
 }
 
