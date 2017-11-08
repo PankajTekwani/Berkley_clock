@@ -57,6 +57,11 @@ struct thrd_data
 	struct process *proc;
 }thrd_data;
 
+
+/*
+This Function populates all the datastructure of the Struct Process
+*/
+
 int fetch_port(vector<struct process> &process_list,int id)
 {
 	ifstream file;
@@ -89,6 +94,10 @@ int fetch_port(vector<struct process> &process_list,int id)
 	return self_port;
 }
 
+/*
+To get the index of the process with Pid = id
+*/
+
 int get_port(vector<struct process> process_list,int id)
 {
 	vector<struct process>::iterator proc_it;
@@ -102,6 +111,10 @@ int get_port(vector<struct process> process_list,int id)
 
 	return -1;
 }
+
+/*
+This funtion prints the contents of the buffer i.e which processes has requested the critical section.
+*/
 
 void print_buffer(struct process *proc)
 {
@@ -129,6 +142,9 @@ int get_index(struct process *proc,int pid)
 	return -1;
 }
 
+/*
+This thread receives the requests from the other processes. If the request is to access the critical section, it buffers the request in the queue. If it is the Release of the CS then it notifies 'grant_permission' thread that the process has released the critical section. Finally if it is a BYE message it closes the connection with the process.
+*/
 
 void *update_buffer(void *arg)
 {
@@ -170,7 +186,9 @@ void *update_buffer(void *arg)
 	close(td->csock);
 }
 
-
+/*
+This thread reads the requests from the queue and grants the access to the corresponding function. If someone else is using the critical section it then waits on the condition variable till it is signalled by the 'update_buffer' thread.
+*/
 void *grant_permission(void *arg)
 {
 	struct process *proc = (struct process *)arg;
@@ -209,6 +227,9 @@ void *grant_permission(void *arg)
 
 }
 
+/*
+This function makes itself the Centralized server.
+*/
 void make_self_server(struct process &self, vector<struct process> process_list)
 {
 	struct sockaddr_in server_addr,cli_addr;
@@ -281,9 +302,9 @@ void make_self_server(struct process &self, vector<struct process> process_list)
 	close(self.listen_sock);
 }
 
-/**********************************************************************************************************************
-**********************************************************************************************************************/
-
+/*
+Processes with PID not as 1 will be the processes that needs permission grant from the Centralized server to access the CS.
+*/
 void make_self_client(struct process &self, vector<struct process> process_list)
 {
 	struct sockaddr_in serv_addr;

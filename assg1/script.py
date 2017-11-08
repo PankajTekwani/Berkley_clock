@@ -14,7 +14,7 @@ with open ('processConfig','rb') as f:
 x=1
 #for x in range(1, 4):
 while x <= lines:
-	os.system ("gnome-terminal -e 'bash -c \"./berkley.o " + str(x) + "; exec bash\"'")
+	os.system ("gnome-terminal -e 'bash -c \"./berkley.o " + str(x) + " | tee proc" + str(x) + "; exec bash\"'")
 	time.sleep(1)
 	x += 1
 

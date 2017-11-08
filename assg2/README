@@ -1,0 +1,14 @@
+Make sure all the files remains in the same directory and names of the directory or file should not be altered.
+
+In order to update the Number of Multicast messages sent by each process the macro in the CPP file 'NO_OF_MULTICAST' needs to be updated and then recompiled before execution.
+
+Command to 
+
+1. Compile:
+		-->make
+
+2. Execute:
+		-->python script.py
+
+
+The 'processCofig' file is arranged as columns of Process id and corresponding Port no.

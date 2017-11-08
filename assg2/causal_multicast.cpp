@@ -1,11 +1,3 @@
-
-/*
-	g++ berkley.cpp -o berkley.o -lpthread
-	./berkley.o 1
-
- include<cstdlib>
-*/
-
 #include <iostream>
 #include <fstream>
 #include <stdlib.h>
@@ -25,14 +17,31 @@
 
 using namespace std;
 
-#define NO_OF_MESSAGES 80
+#define NO_OF_MULTICAST 4
+
+static int start_causal = 0;
+static int received = 0;
+static int cs = 1;
+static int start_mutex = 0;
+pthread_mutex_t r_lock;
+pthread_mutex_t cs_lock;
+
+vector<int> ack;
+pthread_mutex_t ack_lock;
+
+struct request
+{
+	int pid;
+	int req;
+	int ack;
+	int done;
+};
 
 struct message
 {
 	int msg_id;
 	int pid;
 	int is_causal;
-	//vector<struct process_clock> v_clk;
 	int vc[50];
 };
 
@@ -72,10 +81,26 @@ struct thread_data
 };
 
 /*
+Reset the vector clocks
+*/
+void reset_vc(struct process *curr)
+{
+	int i;
+	int size = curr->p_group.size() + 1;
+	pthread_mutex_lock(&(curr->vc_lock));
+	for(i=0;i<size;i++)
+	{
+		curr->v_clk[i].clk = 0;
+	}
+	pthread_mutex_unlock(&(curr->vc_lock));
+	cout<<"Reset Vector Colcks"<<endl;
+}
+
+
+/*
 Create processes list to send multicast and retrieves its own port no. from file
 Also initialize vector clocks to 0 for all processes.
 */
-
 int fetch_port(vector<struct process_group> &p_group,vector<struct process_clock> &v_clk,int id)
 {
 	ifstream file;
@@ -113,6 +138,9 @@ int fetch_port(vector<struct process_group> &p_group,vector<struct process_clock
 	return self_port;
 }
 
+/*
+Return the Index of Vector clk based on the Process ID 
+*/
 int get_index_of_vectorClk(vector<struct process_clock> v_clk, int pid)
 {
 	int i,size = v_clk.size();
@@ -125,6 +153,9 @@ int get_index_of_vectorClk(vector<struct process_clock> v_clk, int pid)
 	return -1;
 }
 
+/*
+Checks the Causality of the Multicast message
+*/
 int check_causality(struct process *proc, struct message msg)
 {
 	pthread_mutex_lock(&(proc->vc_lock));
@@ -146,13 +177,16 @@ int check_causality(struct process *proc, struct message msg)
 	return flg;
 }
 
+/*
+This function delivers the message.
+*/
 void deliver_msg(struct process *proc, struct message msg)
 {
-	int i,size,index;
+	int i,size,index,excl;
 	pthread_mutex_lock(&(proc->vc_lock));
 	index = get_index_of_vectorClk(proc->v_clk,msg.pid);
 	size = proc->v_clk.size();
-
+	cout<<" Deliverd With Causality MsgId:"<<msg.msg_id<<endl;
 	cout<<" Vector in Msg:[ ";
 	for(i = 0; i<size ;i++)
 	{
@@ -165,9 +199,8 @@ void deliver_msg(struct process *proc, struct message msg)
 		proc->v_clk[i].clk = max(proc->v_clk[i].clk,msg.vc[i]);
 	}	
 
-	cout<<" Deliverd MsgId:"<<msg.msg_id<<" ";
 	proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
-	cout<<"P"<<proc->pid<<" Vector Clk:[";
+	cout<<" P"<<proc->pid<<" Vector Clk:[";
 	for(i = 0; i<size ;i++)
 	{
 		cout<<proc->v_clk[i].clk<<" ";
@@ -176,21 +209,11 @@ void deliver_msg(struct process *proc, struct message msg)
 	cout<<"]"<<endl;
 	pthread_mutex_unlock(&(proc->vc_lock));
 }
+
 /*
-int get_index_buffer(struct process *proc, vector<struct message> msg)
-{
-	int i,size = proc->buffer.size();
-	int index = get_index_of_vectorClk(proc->v_clk,msg.pid); 
-	int vc = 
-	for(i=0;i<size;i++)
-	{
-		//cout<<i+1<<" P"<<v_clk[i].pid<<endl;
-		if(buffer[i].pid == pid)
-			return i;
-	}
-	return -1;
-}
+If the message is not confirming the causality, this function is used to buffer the message.
 */
+
 void push_into_buffer(struct process *proc, struct message msg)
 {
 	pthread_mutex_lock(&(proc->buffer_lock));
@@ -198,19 +221,26 @@ void push_into_buffer(struct process *proc, struct message msg)
 	pthread_mutex_unlock(&(proc->buffer_lock));
 }
 
+
+/*
+To check the buffer if the causality is satisfied of the messages in the buffer.
+*/
 void check_buffer(struct process *proc)
 {
 	pthread_mutex_lock(&(proc->buffer_lock));
-	int i,size = proc->buffer.size();
+	int i;
 	struct message msg;
-	for(i=0;i<size;i++)
+	i=0;
+	while(i<proc->buffer.size())
 	{
 		msg = proc->buffer[i];
 		if(check_causality(proc,msg))
 		{
 			deliver_msg(proc,msg);
 			proc->buffer.erase(proc->buffer.begin() + i);
+			i=-1;
 		}
+		i++;
 	}
 	pthread_mutex_unlock(&(proc->buffer_lock));
 }
@@ -242,9 +272,41 @@ void * receive_msg(void *arg)
 {
 	struct thread_data *td = (struct thread_data *)arg;
 	struct message msg;
-	int byte_read,i = 0,sl;
+	int byte_read,byte_written,i = 0,sl,j,conn,pid;
 	int size = td->proc->v_clk.size();
-	while(i<NO_OF_MESSAGES)
+	struct request packet;
+
+// Recieve Non Causal Messages first.
+	while(i<(NO_OF_MULTICAST))
+	{
+		byte_read = read(td->conn,&msg,sizeof(struct message));
+		if(byte_read > 0)
+		{
+			cout<<"Recieved & Delivered Without Causality MsgId:"<<msg.msg_id<<" from P"<< msg.pid;
+			cout<<"  , Vector Clk:[";
+			for(j = 0; j<size ;j++)
+			{
+				cout<<td->proc->v_clk[j].clk<<" ";
+			}
+
+			cout<<"]"<<endl;
+
+			//deliver_msg(td->proc,msg);
+		}
+		i++;
+	}
+	byte_written = write(td->conn, (void *)&j, sizeof(j));
+	pthread_mutex_lock(&r_lock);
+	received++;
+	pthread_mutex_unlock(&r_lock);
+	while(start_causal == 0)
+	{
+		sleep(1);
+	}
+
+//Recieve Causal Messages now.	
+	i=0;
+	while(i<(NO_OF_MULTICAST))
 	{
 		byte_read = read(td->conn,&msg,sizeof(struct message));
 		srand (time(NULL));
@@ -254,36 +316,43 @@ void * receive_msg(void *arg)
 		{
 			cout<<"Recieved MsgId:"<<msg.msg_id<<" from P"<< msg.pid;
 			cout<<" with Vector Clk:[";
-			for(i = 0; i<size ;i++)
+			for(j = 0; j<size ;j++)
 			{
-				cout<<msg.vc[i]<<" ";
+				cout<<msg.vc[j]<<" ";
 			}
 
 			cout<<"]"<<endl;
 
-			if(td->proc->buffer.size())
-			{
-				check_buffer(td->proc);
-			}
-			// If causality is violated then buffer the message
-			if(!check_causality(td->proc,msg))
-			{
-				cout<<"Buffer msg id:"<<msg.msg_id<<endl;
-				push_into_buffer(td->proc, msg);
-				//td->proc->buffer.push_back(msg);
-			}
-			// Else deliver the message
-			else
+			if(msg.is_causal == 1 && check_causality(td->proc,msg))
 			{
 				deliver_msg(td->proc,msg);
+				check_buffer(td->proc);
+			}
+			else
+			{
+				check_buffer(td->proc);
+				if(check_causality(td->proc,msg))
+				{
+					deliver_msg(td->proc,msg);
+					check_buffer(td->proc);
+				}
+				else
+				{	//Push into Buffer;
+					cout<<"Causality Violated, Buffering the MsgId:"<<msg.msg_id<<endl;
+					push_into_buffer(td->proc, msg);
+				}
 			}
 		}
 		i++;
 	}
+
 	empty_buffer(td->proc);
 	if(td->proc->buffer.size())
 		cout<<"Buffer still not empty"<<endl;
+
+	//close(td->conn);
 }
+
 
 void* reciever(void * arg)
 {
@@ -342,14 +411,17 @@ void* reciever(void * arg)
 	}
 }
 
+
 void* sender(void * arg)
 {
 	struct process *proc = (struct process *)arg;
 	struct message msg;
-	int i,j,byte_written,index,x,sl;
+	int i,j,byte_written,index,x,sl,byte_read;
 	int proc_grp_size = proc->p_group.size();
-	int vsize;	
-	for(x=0;x<NO_OF_MESSAGES;x++)
+	int vsize,excl;	
+	pthread_t mutex_thread;
+	cout<<endl<<"*********Send Multicast without Causality***********"<<endl;
+	for(x=0;x<NO_OF_MULTICAST;x++)
 	{
 		msg.msg_id = (100 * proc->pid) + x; //+i
 		msg.pid = proc->pid;
@@ -372,19 +444,69 @@ void* sender(void * arg)
 				cout<< msg.vc[j]<<" ";
 		}
 			cout<<"]"<<endl;
+
+		// Send Multicast without Causality
+		msg.is_causal = 0;
+		for(i = 0; i<proc_grp_size ; i++)
+		{
+			byte_written = write(proc->p_group[i].conn, (void *)&msg, sizeof(struct message));		
+		}
+	}
+
+//Waiting for Recievers Ack to ensure that recievers have recieved w/o Causal Multicasts
+	for(i = 0; i<proc_grp_size ; i++)
+	{
+		byte_read = read(proc->p_group[i].conn, (void *)&x, sizeof(x));
+	}
+	
+	while(received != proc_grp_size)
+	{
+		sleep(1);
+	}
+	reset_vc(proc);
+	start_causal = 1;
+	received = 0;
+//Sending Causal Multicasts
+	cout<<endl<<"*********Send Multicast with Causality***********"<<endl;
+	for(x=0;x<NO_OF_MULTICAST;x++)
+	{
+		msg.msg_id = (100 * proc->pid) + x;
+		msg.pid = proc->pid;
+
+		pthread_mutex_lock(&(proc->vc_lock));
+		vsize = proc->v_clk.size();
+		index = get_index_of_vectorClk(proc->v_clk, proc->pid);
+		proc->v_clk[index].clk = proc->v_clk[index].clk + 1;
+
+		for(i=0;i<vsize;i++)
+		{
+			msg.vc[i] = proc->v_clk[i].clk;
+		}
+		pthread_mutex_unlock(&(proc->vc_lock));
+		msg.vc[i] = -1;
+		//msg.v_clk = proc->v_clk;
+		cout<<"Sending Multicast Msg id "<< msg.msg_id<<" [";
+		for(j=0;j<vsize;j++)
+		{
+				cout<< msg.vc[j]<<" ";
+		}
+			cout<<"]"<<endl;
+
+		// Send Multicast with Causality
+		msg.is_causal = 1;
 		for(i = 0; i<proc_grp_size ; i++)
 		{
 			byte_written = write(proc->p_group[i].conn, (void *)&msg, sizeof(struct message));
 			srand (time(NULL));
 			sl = rand() % 3;
 			sleep(sl);
-			//cout<<"Sent msg id "<< msg.msg_id <<" from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<" [";
-			
+			//cout<<"Sent msg id "<< msg.msg_id <<" from P"<< proc->pid<<" to P"<<proc->p_group[i].pid<<" [";		
 		}
 		srand (time(NULL));
 		sl = rand() % 4;
 		sleep(sl);
 	}
+
 }
 
 void prepare_q(queue<struct process_group> &connect_grp,vector<struct process_group> p_group)
@@ -451,7 +573,7 @@ int create_connection(struct process &curr_proc)
 		if(connect(cli_sock,(struct sockaddr *)&serv_addr,sizeof(serv_addr))<0)
 		{
 			//cout<<"Unable to connect to P"<< proc.pid<<" Port = "<< proc.port <<endl;
-			close(cli_sock);
+			//close(cli_sock);
 			connect_grp.push(proc);
 			//cout<<"Size of Queue:"<<connect_grp.size()<<endl;
 			sleep(1);
@@ -485,6 +607,7 @@ int main(int argc, char *argv[])
 	setbuf(stdout,NULL);
 	pthread_mutex_init(&self.buffer_lock,NULL);
 	pthread_mutex_init(&self.vc_lock,NULL);
+	pthread_mutex_init(&r_lock,NULL);
 	self.pid = atoi(argv[1]);
 	self.port=fetch_port(self.p_group, self.v_clk, self.pid);
 	cout<<"P"<<self.pid<<" ,Port:"<<self.port<<endl;
@@ -496,16 +619,6 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	/*for(proc_it = self.p_group.begin(); proc_it!=self.p_group.end(); proc_it++)
-	{
-		cout<< proc_it->pid<<"*"<< proc_it->port <<endl;
-	}*/
-/*
-	for(vc_it = self.v_clk.begin(); vc_it!=self.v_clk.end(); vc_it++)
-	{
-		cout<< vc_it->pid<<"*"<< vc_it->clk <<endl;
-	}
-*/
 	//Create Recieving Thread
 	pthread_create(&listen_thread,NULL,reciever,(void*)&self);
 	create_connection(self);
@@ -513,10 +626,14 @@ int main(int argc, char *argv[])
 	create_connection() function ensures that all the connection are ready 
 	and we can now send the Messages. Now create Sending Thread
 */
+
 	pthread_create(&send_thread,NULL,sender,(void*)&self);
-	//Wait for Reciever Thread.
+
+//Wait for Reciever and Sender Thread.
 	pthread_join(listen_thread,NULL);
 	pthread_join(send_thread,NULL);
+	
+
 	return 0;
 }
 

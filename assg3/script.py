@@ -1,5 +1,7 @@
 '''
-The processCofig file is arranged as columns of Process id and corresponding Port no. Process Id 1 is always the time deamon.
+The processCofig file is arranged as columns of Process id and corresponding Port no. Process Id 1 is always the Centralized Server.
+
+Results will be stored in the 'test' file.
 '''
 
 import os
@@ -14,7 +16,7 @@ with open ('processConfig','rb') as f:
 x=1
 #for x in range(1, 4):
 while x <= lines:
-	os.system ("gnome-terminal -e 'bash -c \"valgrind ./mutex " + str(x) + "; exec bash\"'")
+	os.system ("gnome-terminal -e 'bash -c \"./mutex " + str(x) + " | tee proc" + str(x) + "; exec bash\"'")
 	time.sleep(1)
 	x += 1
 

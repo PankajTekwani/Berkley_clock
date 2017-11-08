@@ -49,6 +49,10 @@ struct thrd_data
 	struct process *proc;
 }thrd_data;
 
+/*
+This function is to read the file to get information about Time Daemon and Self Pid.
+*/
+
 int fetch_port(vector<struct process> &process_list,int id)
 {
 	ifstream file;
@@ -81,6 +85,10 @@ int fetch_port(vector<struct process> &process_list,int id)
 	return self_port;
 }
 
+/*
+To get the port number of the Time Daemon from the Table.
+*/
+
 int get_port(vector<struct process> process_list,int id)
 {
 	vector<struct process>::iterator proc_it;
@@ -95,19 +103,27 @@ int get_port(vector<struct process> process_list,int id)
 	return -1;
 }
 
+/*
+To read the offset from the Secondary Servers.
+*/
+
 void *update_clk_vector(void *arg)
 {
 	struct thrd_data *td = (struct thrd_data *)arg;
 	int byte_read;
 	struct message msg;
 	byte_read = read(td->csock, &msg, sizeof(struct message));
-	cout<<"Offset at Client ["<<msg.pid<<"] :"<<msg.offset<<endl;
+	cout<<"Offset at Secondary Server ["<<msg.pid<<"] :"<<msg.offset<<endl;
 	//cout<<"Sizeof(message):"<<sizeof(struct message)<<" byteread:"<<byte_read<<endl;
 	//cout<<"ConnId at Client ["<<msg.pid<<"] :"<<msg.conn<<endl;
 	msg.conn = td->csock;
 	td->proc->msg_vector.push_back(msg);
 	
 }
+
+/*
+To calculate all the offsets and the Avg of those.
+*/
 
 int sync_clocks(vector<struct message> &msg_vector)
 {
@@ -128,6 +144,10 @@ int sync_clocks(vector<struct message> &msg_vector)
 	return avg;
 }
 
+/*
+To send the offsets back to Secondary server to update their clocks.
+*/
+
 void send_offsets(vector<struct message> msg_vector)
 {
 	vector<struct message>::iterator it;
@@ -147,6 +167,10 @@ void send_offsets(vector<struct message> msg_vector)
 	}
 	
 }
+
+/*
+This function is to make the Process with Id 1 as Time Daemon.
+*/
 
 void make_self_server(struct process &self, vector<struct process> process_list)
 {
@@ -184,7 +208,7 @@ void make_self_server(struct process &self, vector<struct process> process_list)
 	cli = 0;
 	//cout<<"no_of_clients = "<<no_of_clients<<endl;
 	//offset.push_back(self.clock);
-	cout<<"Sending Clock to all Clients."<<endl;
+	cout<<"Sending Clock to all Secondary Servers."<<endl;
 	while(cli<no_of_clients)
 	{
 	
@@ -226,8 +250,10 @@ void make_self_server(struct process &self, vector<struct process> process_list)
 	close(self.listen_sock);
 }
 
-/**********************************************************************************************************************
-**********************************************************************************************************************/
+
+/*
+This function is to create the Secondary server which sync their logical clocks with Time Daemon using Berkley Algorithm.
+*/
 
 void make_self_client(struct process &self, vector<struct process> process_list)
 {
@@ -253,7 +279,7 @@ void make_self_client(struct process &self, vector<struct process> process_list)
 	serv_addr.sin_port = htons(server_port);
 	//inet_aton((char *)server->h_addr, /*(struct in_addr *)*/(char *)&serv_addr.sin_addr.s_addr);
 	bcopy((char *)server->h_addr,(char *)&serv_addr.sin_addr.s_addr,server->h_length);
-	cout<<"Clock at Client:"<<self.clock<<endl;
+	cout<<"Self Logical Clock:"<<self.clock<<endl;
 	//Connecct to Server
 	if(connect(self.listen_sock,(struct sockaddr *)&serv_addr,sizeof(serv_addr))<0)
 	{
@@ -268,11 +294,15 @@ void make_self_client(struct process &self, vector<struct process> process_list)
 	byte_written = write(self.listen_sock, (void *)&msg, sizeof(msg));
 	cout<<"Sent offset to Time Daemon"<<endl;
 	byte_read = read(self.listen_sock,&msg,sizeof(msg));
-	cout<<"Recieved new offset from Time Daemon"<<endl;
+	cout<<"Recieved new offset from Time Daemon:"<<msg.offset<<endl;
 	self.clock += msg.offset;
 	cout<<"Synced local Clock:"<<self.clock<<endl;
 	close(self.listen_sock);
 }
+
+/*
+Main Function
+*/
 
 int main(int argc, char *argv[])
 {

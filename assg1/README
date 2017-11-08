@@ -1,0 +1,13 @@
+Make sure all the files remains in the same directory and names of the directory or file should not be altered.
+
+
+Command to 
+
+1. Compile:
+		-->make
+
+2. Execute:
+		-->python script.py
+
+
+The 'processCofig' file is arranged as columns of Process id and corresponding Port no. Process Id 1 is always the time deamon so it should always be there in file.
